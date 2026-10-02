@@ -22,15 +22,27 @@ field is optional and defaults to ``false``.
 
 The relay also accepts ``POST /control`` for safe, predefined actions
 (no arbitrary IPC command is accepted): ``toggle_pause`` (``cycle
-pause``), ``next``/``previous`` (``playlist-next weak`` /
-``playlist-prev weak``), ``stop`` (``stop keep-playlist``, which
-remembers the stopped index so that ``next``/``previous`` can resume
-from it with ``playlist-play-index`` while MPV is idle),
-``play_index`` (``playlist-play-index <index>``, to jump to a given
-entry), ``remove_index`` (``playlist-remove <index>``, to drop an
-entry) and ``clear`` (``stop``, which empties the playlist). A new
-``POST /play``, a ``play_index``, a ``remove_index`` or a ``clear``
-forgets the remembered index.
+pause``), ``toggle_mute`` (``cycle mute``, which reports the new mute
+state as ``muted`` and shows an on-screen indicator),
+``volume_up``/``volume_down`` (``osd-msg-bar add volume 5`` /
+``osd-msg-bar add volume -5``, which trigger MPV's native OSD bar),
+``next``/``previous`` (``playlist-next weak`` / ``playlist-prev weak``),
+``stop`` (``stop keep-playlist``, which remembers the stopped index so
+that ``next``/``previous`` can resume from it with
+``playlist-play-index`` while MPV is idle), ``play_index``
+(``playlist-play-index <index>``, to jump to a given entry),
+``remove_index`` (``playlist-remove <index>``, to drop an entry) and
+``clear`` (``stop``, which empties the playlist). A new ``POST /play``,
+a ``play_index``, a ``remove_index`` or a ``clear`` forgets the
+remembered index.
+
+The volume actions use the ``osd-msg-bar`` prefix: MPV's native way to
+apply a property change and show its OSD bar (value included) in a
+single command, so no separate property read or ``show-text`` is needed.
+The mute indicator is still sent with ``show-text`` and a literal text
+built by the relay (``Mute: on``/``Mute: off``), because MPV does not
+expand ``${mute}`` in commands sent over IPC; it is cosmetic and never
+fails the request.
 
 ``POST /playlist`` returns the current playlist as JSON: the current
 position, whether MPV is idle, and one object per entry with its
@@ -73,20 +85,25 @@ ALLOWED_SCHEMES = ("http", "https")
 # Semantics validated against the MPV documentation (man mpv, section
 # "Command Interface"): stop keep-playlist stops playback but keeps the
 # playlist, playlist-next/prev with weak do nothing at the end of the
-# playlist, cycle pause toggles.
+# playlist, cycle pause toggles. The "osd-msg-bar" prefix is MPV's native
+# way to apply a property change and show its OSD bar in one command, so
+# the volume actions need no separate property read or show-text.
 CONTROL_ACTIONS = {
     "toggle_pause": [("basculer la pause", ["cycle", "pause"])],
+    "volume_up": [("monter le volume", ["osd-msg-bar", "add", "volume", 5])],
+    "volume_down": [
+        ("baisser le volume", ["osd-msg-bar", "add", "volume", -5])],
     "next": [("piste suivante", ["playlist-next", "weak"])],
     "previous": [("piste précédente", ["playlist-prev", "weak"])],
     "stop": [("arrêter la lecture", ["stop", "keep-playlist"])],
     "clear": [("vider la file de lecture", ["stop"])],
 }
 
-# All accepted POST /control action names. "play_index" and
-# "remove_index" are handled separately because their command depends on
-# the request.
+# All accepted POST /control action names. "play_index",
+# "remove_index" and "toggle_mute" are handled separately because their
+# reply depends on the request (or on a read-back property).
 CONTROL_ACTION_NAMES = frozenset(CONTROL_ACTIONS) | {
-    "play_index", "remove_index"}
+    "play_index", "remove_index", "toggle_mute"}
 
 
 def is_valid_url(value):
@@ -310,7 +327,8 @@ class RelayHandler(BaseHTTPRequestHandler):
                     "usage": "POST /play  {\"url\": \"http(s)://...\", "
                              "\"socket\": \"/chemin/optionnel\", "
                              "\"append\": false} ; POST /control  "
-                             "{\"action\": \"toggle_pause|next|previous|"
+                             "{\"action\": \"toggle_pause|toggle_mute|"
+                             "volume_up|volume_down|next|previous|"
                              "stop|clear|play_index|remove_index\", "
                              "\"socket\": "
                              "\"/chemin/optionnel\", \"index\": 0} ; "
@@ -546,6 +564,8 @@ class RelayHandler(BaseHTTPRequestHandler):
             self._control_play_index(socket_path, data)
         elif action == "remove_index":
             self._control_remove_index(socket_path, data)
+        elif action == "toggle_mute":
+            self._control_toggle_mute(socket_path)
         elif action == "clear":
             # Empty the playlist and forget any pending resume position.
             if not self._run_mpv_steps(
@@ -554,7 +574,7 @@ class RelayHandler(BaseHTTPRequestHandler):
             self._server.clear_resume(socket_path)
             self._send_json(200, {"status": "ok", "error": "success"})
         else:
-            # toggle_pause is unconditional.
+            # toggle_pause and the volume actions are unconditional.
             if not self._run_mpv_steps(
                     socket_path, list(CONTROL_ACTIONS[action])):
                 return
@@ -600,6 +620,64 @@ class RelayHandler(BaseHTTPRequestHandler):
                 [("retirer l'entrée", ["playlist-remove", index])]):
             return
         self._send_json(200, {"status": "ok", "error": "success"})
+
+    def _control_toggle_mute(self, socket_path):
+        """Toggle MPV's mute property, show an on-screen indicator and
+        report the new state as ``muted``. Mute is unrelated to the resume
+        position, so the memory is left untouched."""
+        reply = self._call_mpv(socket_path, "basculer la sourdine",
+                               ["cycle", "mute"])
+        if reply is None:
+            return
+
+        # Read the new state. A missing or unavailable property is not an
+        # error here: fall back to False when the value is not a boolean.
+        step = "lire l'état de sourdine"
+        try:
+            state = send_mpv_command(
+                socket_path, ["get_property", "mute"],
+                self._server.mpv_timeout)
+        except OSError as exc:
+            LOG.warning("étape \"%s\" : prise MPV injoignable (%s) : %s",
+                        step, socket_path, exc)
+            self._send_json(502, {"error": "prise MPV injoignable",
+                                  "step": step, "detail": str(exc)})
+            return
+        if _is_transport_error(state):
+            LOG.warning("étape \"%s\" : MPV a rejeté la commande : %s",
+                        step, state.get("error"))
+            self._send_json(502, {"error": "MPV a rejeté la commande",
+                                  "step": step,
+                                  "detail": state.get("error", "inconnu")})
+            return
+        muted = state.get("data")
+        if not isinstance(muted, bool):
+            muted = False
+
+        # Like the native mute key, show the new state on screen. MPV does
+        # not expand ${mute} over IPC, so build the literal text here.
+        text = "Mute: on" if muted else "Mute: off"
+        self._show_text_best_effort(
+            socket_path, "afficher la sourdine", text)
+        self._send_json(200, {"status": "ok", "error": "success",
+                              "muted": muted})
+
+    def _show_text_best_effort(self, socket_path, step, text):
+        """Send a show-text command, best-effort.
+
+        The on-screen indicator is cosmetic, so a failure (unreachable
+        socket or MPV rejection) is only logged and never fails the
+        request."""
+        try:
+            reply = send_mpv_command(
+                socket_path, ["show-text", text], self._server.mpv_timeout)
+        except OSError as exc:
+            LOG.warning("étape \"%s\" (best-effort) : prise MPV injoignable "
+                        "(%s) : %s", step, socket_path, exc)
+            return
+        if reply.get("error") != "success":
+            LOG.warning("étape \"%s\" (best-effort) : MPV a rejeté la "
+                        "commande : %s", step, reply.get("error"))
 
     def _control_stop(self, socket_path):
         """Stop playback but keep the playlist, remembering the current

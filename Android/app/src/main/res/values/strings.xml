@@ -9,6 +9,9 @@
     <string name="controls_section_label">Controls</string>
     <string name="control_clear">Clear playlist</string>
     <string name="control_stop_desc">Stop playback</string>
+    <string name="control_mute_desc">Mute</string>
+    <string name="mute_enabled">Mute enabled</string>
+    <string name="mute_disabled">Mute disabled</string>
     <string name="control_previous_desc">Previous track</string>
     <string name="control_play_pause_desc">Play / Pause</string>
     <string name="control_next_desc">Next track</string>

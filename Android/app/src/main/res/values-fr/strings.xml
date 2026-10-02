@@ -6,6 +6,9 @@
     <string name="controls_section_label">Contrôles</string>
     <string name="control_clear">Effacer la liste</string>
     <string name="control_stop_desc">Arrêter la lecture</string>
+    <string name="control_mute_desc">Sourdine</string>
+    <string name="mute_enabled">Sourdine activée</string>
+    <string name="mute_disabled">Sourdine désactivée</string>
     <string name="control_previous_desc">Piste précédente</string>
     <string name="control_play_pause_desc">Lecture / Pause</string>
     <string name="control_next_desc">Piste suivante</string>

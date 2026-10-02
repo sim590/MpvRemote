@@ -2,6 +2,8 @@ package com.example.mpvremote
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
+import android.view.KeyEvent
 import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
@@ -41,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var controlPrevious: ImageButton
     private lateinit var controlNext: ImageButton
     private lateinit var controlStop: ImageButton
+    private lateinit var controlMute: ImageButton
     private lateinit var controlClear: Button
 
     private lateinit var playlistSwipeRefresh: SwipeRefreshLayout
@@ -48,6 +51,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playlistEmptyView: TextView
     private lateinit var playlistAdapter: PlaylistAdapter
     private val titleResolver = TitleResolver()
+
+    private var lastVolumeUpTime = 0L
+    private var lastVolumeDownTime = 0L
+    private var isMuted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -67,6 +74,7 @@ class MainActivity : AppCompatActivity() {
         controlPrevious = findViewById(R.id.control_previous)
         controlNext = findViewById(R.id.control_next)
         controlStop = findViewById(R.id.control_stop)
+        controlMute = findViewById(R.id.control_mute)
         controlClear = findViewById(R.id.control_clear)
 
         playlistSwipeRefresh = findViewById(R.id.playlist_swipe_refresh)
@@ -99,6 +107,33 @@ class MainActivity : AppCompatActivity() {
             showSection(Section.REMOTE)
             handleSendIntent(intent)
         }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP -> {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    handleVolumeEvent(ACTION_VOLUME_UP) { lastVolumeUpTime = it }
+                }
+                true
+            }
+            KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    handleVolumeEvent(ACTION_VOLUME_DOWN) { lastVolumeDownTime = it }
+                }
+                true
+            }
+            else -> super.dispatchKeyEvent(event)
+        }
+    }
+
+    private fun handleVolumeEvent(action: String, updateLastTime: (Long) -> Unit) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - (if (action == ACTION_VOLUME_UP) lastVolumeUpTime else lastVolumeDownTime) < VOLUME_THROTTLE_MS) {
+            return
+        }
+        updateLastTime(now)
+        sendControlRequest(action, silentSuccess = true, refreshPlaylist = false)
     }
 
     private fun setupDrawer() {
@@ -140,6 +175,7 @@ class MainActivity : AppCompatActivity() {
         controlPrevious.setOnClickListener { sendControlRequest(ACTION_PREVIOUS) }
         controlNext.setOnClickListener { sendControlRequest(ACTION_NEXT) }
         controlStop.setOnClickListener { sendControlRequest(ACTION_STOP) }
+        controlMute.setOnClickListener { toggleMute() }
         controlClear.setOnClickListener { sendControlRequest(ACTION_CLEAR) }
     }
 
@@ -213,7 +249,11 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun sendControlRequest(action: String) {
+    private fun sendControlRequest(
+        action: String,
+        silentSuccess: Boolean = false,
+        refreshPlaylist: Boolean = true
+    ) {
         val settings = currentSettings()
         if (settings.baseUrl.isBlank()) {
             showError(getString(R.string.error_send, getString(R.string.error_empty_relay)))
@@ -228,13 +268,52 @@ class MainActivity : AppCompatActivity() {
                 }
                 postJson(settings.baseUrl, "/control", payload)
                 runOnUiThread {
-                    showSuccess(getString(R.string.success_control, action))
-                    loadPlaylist()
+                    if (!silentSuccess) {
+                        showSuccess(getString(R.string.success_control, action))
+                    }
+                    if (refreshPlaylist) {
+                        loadPlaylist()
+                    }
                 }
             } catch (e: Exception) {
                 runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
             }
         }.start()
+    }
+
+    private fun toggleMute() {
+        val settings = currentSettings()
+        if (settings.baseUrl.isBlank()) {
+            showError(getString(R.string.error_send, getString(R.string.error_empty_relay)))
+            return
+        }
+
+        Thread {
+            try {
+                val payload = JSONObject().apply {
+                    put("action", ACTION_TOGGLE_MUTE)
+                    put("socket", settings.socketPath)
+                }
+                val body = postJsonForResponse(settings.baseUrl, "/control", payload)
+                val response = JSONObject(body)
+                val muted = if (response.has("muted")) {
+                    response.getBoolean("muted")
+                } else {
+                    !isMuted
+                }
+                runOnUiThread {
+                    isMuted = muted
+                    updateMuteIcon()
+                    showSuccess(getString(if (isMuted) R.string.mute_enabled else R.string.mute_disabled))
+                }
+            } catch (e: Exception) {
+                runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
+            }
+        }.start()
+    }
+
+    private fun updateMuteIcon() {
+        controlMute.setImageResource(if (isMuted) R.drawable.ic_volume_off else R.drawable.ic_volume_on)
     }
 
     private fun playPlaylistItem(item: PlaylistItem) {
@@ -428,5 +507,10 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_CLEAR = "clear"
         private const val ACTION_PLAY_INDEX = "play_index"
         private const val ACTION_REMOVE_INDEX = "remove_index"
+        private const val ACTION_VOLUME_UP = "volume_up"
+        private const val ACTION_VOLUME_DOWN = "volume_down"
+        private const val ACTION_TOGGLE_MUTE = "toggle_mute"
+
+        private const val VOLUME_THROTTLE_MS = 120L
     }
 }

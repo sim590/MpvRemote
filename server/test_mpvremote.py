@@ -447,6 +447,125 @@ class RelayHttpTests(unittest.TestCase):
         self.assertEqual(mpv.received_commands,
                          [["playlist-prev", "weak"]])
 
+    def test_control_volume_up(self):
+        """volume_up sends a single osd-msg-bar command, MPV's native way
+        to change the volume and show the OSD bar."""
+        mpv, sock = self.fake_mpv()
+        status, _ = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "volume_up", "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(mpv.received_commands, [
+            ["osd-msg-bar", "add", "volume", 5],
+        ])
+
+    def test_control_volume_down(self):
+        """volume_down sends a single osd-msg-bar command."""
+        mpv, sock = self.fake_mpv()
+        status, _ = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "volume_down", "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(mpv.received_commands, [
+            ["osd-msg-bar", "add", "volume", -5],
+        ])
+
+    def test_control_volume_default_socket(self):
+        """The volume actions work with the default socket."""
+        status, _ = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "volume_up"}),
+        )
+        self.assertEqual(status, 200)
+
+    def test_control_toggle_mute_true(self):
+        """toggle_mute cycles mute, reads it back, then shows a literal OSD
+        text, in that order."""
+        mpv, sock = self.fake_mpv(props={"mute": True})
+        status, body = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "toggle_mute", "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {
+            "status": "ok", "error": "success", "muted": True})
+        self.assertEqual(mpv.received_commands, [
+            ["cycle", "mute"],
+            ["get_property", "mute"],
+            ["show-text", "Mute: on"],
+        ])
+
+    def test_control_toggle_mute_false(self):
+        """The reported state follows the fake's mute property and the
+        literal OSD says off."""
+        mpv, sock = self.fake_mpv(props={"mute": False})
+        status, body = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "toggle_mute", "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {
+            "status": "ok", "error": "success", "muted": False})
+        self.assertEqual(mpv.received_commands, [
+            ["cycle", "mute"],
+            ["get_property", "mute"],
+            ["show-text", "Mute: off"],
+        ])
+
+    def test_control_toggle_mute_absent(self):
+        """A missing mute property falls back to False without failing."""
+        mpv, sock = self.fake_mpv(props={})
+        status, body = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "toggle_mute", "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {
+            "status": "ok", "error": "success", "muted": False})
+        self.assertEqual(mpv.received_commands, [
+            ["cycle", "mute"],
+            ["get_property", "mute"],
+            ["show-text", "Mute: off"],
+        ])
+
+    def test_control_toggle_mute_show_text_failure_is_best_effort(self):
+        """A failing mute OSD is logged but the request still succeeds."""
+        mpv, sock = self.fake_mpv(props={"mute": True}, fail_on=3)
+        status, body = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "toggle_mute", "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {
+            "status": "ok", "error": "success", "muted": True})
+        self.assertEqual(mpv.received_commands, [
+            ["cycle", "mute"],
+            ["get_property", "mute"],
+            ["show-text", "Mute: on"],
+        ])
+
+    def test_control_toggle_mute_default_socket(self):
+        """toggle_mute works with the default socket."""
+        status, body = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "toggle_mute"}),
+        )
+        self.assertEqual(status, 200)
+        self.assertIs(json.loads(body)["muted"], False)
+
+    def test_control_toggle_mute_cycle_error(self):
+        """An MPV rejection of cycle mute surfaces as a 502 with the
+        step."""
+        _, sock = self.fake_mpv(fail_on=1)
+        status, body = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "toggle_mute", "socket": sock}),
+        )
+        self.assertEqual(status, 502)
+        self.assertIn("basculer la sourdine", body)
+
     def test_control_clear_is_stop_only(self):
         """clear only sends stop: no image and no loadfile."""
         mpv, sock = self.fake_mpv()

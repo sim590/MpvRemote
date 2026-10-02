@@ -946,6 +946,89 @@ class RelayHttpTests(unittest.TestCase):
         self.assertEqual(status, 502)
         self.assertIn("retirer l'entrée", body)
 
+    def test_control_seek_integer(self):
+        """seek sends the absolute position with the osd-msg-bar prefix."""
+        mpv, sock = self.fake_mpv()
+        status, _ = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "seek", "position": 5,
+                             "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(mpv.received_commands, [
+            ["osd-msg-bar", "seek", 5, "absolute"],
+        ])
+
+    def test_control_seek_float(self):
+        """A float position is passed through as-is."""
+        mpv, sock = self.fake_mpv()
+        status, _ = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "seek", "position": 12.5,
+                             "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(mpv.received_commands, [
+            ["osd-msg-bar", "seek", 12.5, "absolute"],
+        ])
+
+    def test_control_seek_validation(self):
+        """A missing, negative, string or boolean position is rejected with
+        400."""
+        bodies = [
+            {"action": "seek", "socket": "/tmp/x.sock"},
+            {"action": "seek", "socket": "/tmp/x.sock", "position": -1},
+            {"action": "seek", "socket": "/tmp/x.sock", "position": "5"},
+            {"action": "seek", "socket": "/tmp/x.sock", "position": True},
+        ]
+        for body in bodies:
+            with self.subTest(body=body):
+                status, _ = self.request(
+                    "POST", "/control", body=json.dumps(body))
+                self.assertEqual(status, 400)
+
+    def test_control_seek_default_socket(self):
+        """seek works with the default socket."""
+        status, _ = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "seek", "position": 5}),
+        )
+        self.assertEqual(status, 200)
+
+    def test_control_seek_mpv_rejection(self):
+        """An MPV rejection of seek surfaces as a 502 with the step."""
+        _, sock = self.fake_mpv(fail_on=1)
+        status, body = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "seek", "position": 5,
+                             "socket": sock}),
+        )
+        self.assertEqual(status, 502)
+        self.assertIn("déplacer la lecture", body)
+
+    def test_control_seek_keeps_resume_memory(self):
+        """seek does not modify the resume position."""
+        mpv, sock = self.fake_mpv(props={
+            "playlist-pos": 1, "idle-active": True, "playlist-count": 4})
+        self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "stop", "socket": sock}),
+        )
+        status, _ = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "seek", "position": 10,
+                             "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        # The remembered index (1) is kept: next resumes at 2.
+        status, _ = self.request(
+            "POST", "/control",
+            body=json.dumps({"action": "next", "socket": sock}),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(mpv.received_commands[-1],
+                         ["playlist-play-index", 2])
+
     # --- playlist (POST /playlist) -------------------------------------
 
     def test_playlist_response_format(self):
@@ -1071,6 +1154,109 @@ class RelayHttpTests(unittest.TestCase):
             "POST", "/playlist", body=json.dumps({"socket": sock}))
         self.assertEqual(status, 502)
         self.assertIn("réponse invalide", body)
+
+    # --- state (POST /state) -------------------------------------------
+
+    def test_state_response_format(self):
+        """The state is returned with the exact contract, using a single
+        connection and the expected command order."""
+        mpv, sock = self.fake_mpv(props={
+            "time-pos": 12.5, "duration": 120.0, "pause": True,
+            "idle-active": False, "playlist-pos": 2})
+        status, body = self.request(
+            "POST", "/state", body=json.dumps({"socket": sock}))
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {
+            "status": "ok",
+            "idle_active": False,
+            "playlist_pos": 2,
+            "pause": True,
+            "time_pos": 12.5,
+            "duration": 120.0,
+        })
+        self.assertEqual(mpv.received_commands, [
+            ["get_property", "time-pos"],
+            ["get_property", "duration"],
+            ["get_property", "pause"],
+            ["get_property", "idle-active"],
+            ["get_property", "playlist-pos"],
+        ])
+        self.assertEqual(mpv.connection_count, 1)
+
+    def test_state_time_pos_and_duration_unavailable(self):
+        """"property unavailable" on time-pos/duration yields null without
+        failing the request."""
+        mpv, sock = self.fake_mpv(
+            props={"pause": True, "idle-active": False, "playlist-pos": 1},
+            unavailable={"time-pos", "duration"},
+        )
+        status, body = self.request(
+            "POST", "/state", body=json.dumps({"socket": sock}))
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {
+            "status": "ok",
+            "idle_active": False,
+            "playlist_pos": 1,
+            "pause": True,
+            "time_pos": None,
+            "duration": None,
+        })
+
+    def test_state_defaults_when_absent(self):
+        """Missing properties fall back to null/false/-1."""
+        mpv, sock = self.fake_mpv(props={})
+        status, body = self.request(
+            "POST", "/state", body=json.dumps({"socket": sock}))
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body), {
+            "status": "ok",
+            "idle_active": False,
+            "playlist_pos": -1,
+            "pause": False,
+            "time_pos": None,
+            "duration": None,
+        })
+
+    def test_state_default_socket(self):
+        status, body = self.request(
+            "POST", "/state", body=json.dumps({}))
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertIs(data["idle_active"], True)
+        self.assertEqual(data["playlist_pos"], -1)
+        self.assertIs(data["pause"], False)
+        self.assertIsNone(data["time_pos"])
+        self.assertIsNone(data["duration"])
+
+    def test_state_relative_socket(self):
+        status, _ = self.request(
+            "POST", "/state", body=json.dumps({"socket": "relatif.sock"}))
+        self.assertEqual(status, 400)
+
+    def test_state_invalid_json(self):
+        status, _ = self.request("POST", "/state", body="pas du json")
+        self.assertEqual(status, 400)
+
+    def test_state_wrong_method(self):
+        status, _ = self.request(
+            "PUT", "/state", body=json.dumps({}))
+        self.assertEqual(status, 405)
+
+    def test_state_unreachable_socket(self):
+        status, body = self.request(
+            "POST", "/state",
+            body=json.dumps({"socket": "/tmp/prise-inexistante-xyz.sock"}))
+        self.assertEqual(status, 502)
+        self.assertIn("injoignable", body)
+
+    def test_state_property_error_is_502(self):
+        """A non-tolerated property error surfaces as a 502 with the
+        step."""
+        _, sock = self.fake_mpv(props={}, fail_on=2)
+        status, body = self.request(
+            "POST", "/state", body=json.dumps({"socket": sock}))
+        self.assertEqual(status, 502)
+        self.assertIn("lire duration", body)
 
     # --- validations ---------------------------------------------------
 

@@ -2,6 +2,8 @@ package com.example.mpvremote
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.View
@@ -46,11 +48,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var controlMute: ImageButton
     private lateinit var controlClear: Button
 
+    private lateinit var playbackProgress: com.google.android.material.slider.Slider
+    private lateinit var playbackTime: TextView
+
     private lateinit var playlistSwipeRefresh: SwipeRefreshLayout
     private lateinit var playlistRecyclerView: RecyclerView
     private lateinit var playlistEmptyView: TextView
     private lateinit var playlistAdapter: PlaylistAdapter
     private val titleResolver = TitleResolver()
+
+    private val pollHandler = Handler(Looper.getMainLooper())
+    private var isPolling = false
+    private var isActivityResumed = false
+    private var isUserSeeking = false
+    private var lastKnownPlaylistPos = -1
+    private var lastKnownDuration = 0.0
 
     private var lastVolumeUpTime = 0L
     private var lastVolumeDownTime = 0L
@@ -77,12 +89,16 @@ class MainActivity : AppCompatActivity() {
         controlMute = findViewById(R.id.control_mute)
         controlClear = findViewById(R.id.control_clear)
 
+        playbackProgress = findViewById(R.id.playback_progress)
+        playbackTime = findViewById(R.id.playback_time)
+
         playlistSwipeRefresh = findViewById(R.id.playlist_swipe_refresh)
         playlistRecyclerView = findViewById(R.id.playlist_recycler_view)
         playlistEmptyView = findViewById(R.id.playlist_empty_view)
 
         setupDrawer()
         setupPlaylist()
+        setupPlaybackProgress()
         showSection(Section.REMOTE)
         loadSettings()
         setupListeners()
@@ -107,6 +123,25 @@ class MainActivity : AppCompatActivity() {
             showSection(Section.REMOTE)
             handleSendIntent(intent)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        isActivityResumed = true
+        if (remoteSection.visibility == View.VISIBLE) {
+            startStatePolling()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isActivityResumed = false
+        stopStatePolling()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        stopStatePolling()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -187,13 +222,175 @@ class MainActivity : AppCompatActivity() {
                 supportActionBar?.title = getString(R.string.nav_remote)
                 navigationView.setCheckedItem(R.id.nav_remote)
                 loadPlaylist()
+                if (isActivityResumed) {
+                    startStatePolling()
+                }
             }
             Section.SETTINGS -> {
                 remoteSection.visibility = View.GONE
                 settingsSection.visibility = View.VISIBLE
                 supportActionBar?.title = getString(R.string.nav_settings)
                 navigationView.setCheckedItem(R.id.nav_settings)
+                stopStatePolling()
             }
+        }
+    }
+
+    private fun setupPlaybackProgress() {
+        playbackProgress.addOnSliderTouchListener(object : com.google.android.material.slider.Slider.OnSliderTouchListener {
+            override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                isUserSeeking = true
+            }
+
+            override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                isUserSeeking = false
+                val position = slider.value.toDouble()
+                if (lastKnownDuration > 0 && position >= 0) {
+                    seekTo(position)
+                }
+            }
+        })
+
+        playbackProgress.addOnChangeListener { _, value, fromUser ->
+            if (fromUser && lastKnownDuration > 0) {
+                playbackTime.text = getString(
+                    R.string.playback_time_format,
+                    formatTime(value.toDouble()),
+                    formatTime(lastKnownDuration)
+                )
+            }
+        }
+    }
+
+    private fun seekTo(position: Double) {
+        val settings = currentSettings()
+        if (settings.baseUrl.isBlank()) {
+            showError(getString(R.string.error_send, getString(R.string.error_empty_relay)))
+            return
+        }
+
+        Thread {
+            try {
+                val payload = JSONObject().apply {
+                    put("action", ACTION_SEEK)
+                    put("position", position)
+                    put("socket", settings.socketPath)
+                }
+                postJson(settings.baseUrl, "/control", payload)
+                runOnUiThread { fetchStateImmediate() }
+            } catch (e: Exception) {
+                runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
+            }
+        }.start()
+    }
+
+    private fun startStatePolling() {
+        if (isPolling) return
+        isPolling = true
+        scheduleStatePoll(0)
+    }
+
+    private fun stopStatePolling() {
+        isPolling = false
+        pollHandler.removeCallbacksAndMessages(null)
+    }
+
+    private fun scheduleStatePoll(delayMs: Long) {
+        if (!isPolling) return
+        pollHandler.postDelayed({ fetchState() }, delayMs)
+    }
+
+    private fun fetchStateImmediate() {
+        if (remoteSection.visibility != View.VISIBLE) return
+        pollHandler.removeCallbacksAndMessages(null)
+        fetchState()
+    }
+
+    private fun fetchState() {
+        if (!isPolling || remoteSection.visibility != View.VISIBLE) return
+
+        val settings = currentSettings()
+        if (settings.baseUrl.isBlank()) {
+            scheduleStatePoll(STATE_POLL_INTERVAL_MS)
+            return
+        }
+
+        Thread {
+            try {
+                val payload = JSONObject().apply {
+                    put("socket", settings.socketPath)
+                }
+                val body = postJsonForResponse(settings.baseUrl, "/state", payload)
+                val response = JSONObject(body)
+                runOnUiThread {
+                    updateStateUI(response)
+                    val idleActive = response.optBoolean("idle_active", true)
+                    if (!idleActive && isPolling) {
+                        scheduleStatePoll(STATE_POLL_INTERVAL_MS)
+                    } else {
+                        isPolling = false
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (isPolling) {
+                        scheduleStatePoll(STATE_POLL_INTERVAL_MS)
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun updateStateUI(response: JSONObject) {
+        val newPos = response.optInt("playlist_pos", -1)
+        if (newPos != -1 && newPos != lastKnownPlaylistPos) {
+            lastKnownPlaylistPos = newPos
+            loadPlaylist()
+        }
+        updateProgressUI(response)
+    }
+
+    private fun updateProgressUI(response: JSONObject) {
+        val timePosObj = response.takeIf { it.has("time_pos") && !it.isNull("time_pos") }
+        val durationObj = response.takeIf { it.has("duration") && !it.isNull("duration") }
+
+        if (timePosObj != null && durationObj != null) {
+            val timePos = timePosObj.optDouble("time_pos", 0.0)
+            val duration = durationObj.optDouble("duration", 0.0)
+            lastKnownDuration = duration
+            if (duration > 0) {
+                playbackProgress.valueFrom = 0f
+                playbackProgress.valueTo = duration.toFloat()
+                playbackProgress.isEnabled = true
+                if (!isUserSeeking) {
+                    playbackProgress.value = timePos.toFloat().coerceIn(0f, duration.toFloat())
+                }
+                playbackTime.text = getString(
+                    R.string.playback_time_format,
+                    formatTime(timePos),
+                    formatTime(duration)
+                )
+                return
+            }
+        }
+
+        lastKnownDuration = 0.0
+        playbackProgress.isEnabled = false
+        playbackProgress.valueFrom = 0f
+        playbackProgress.valueTo = 100f
+        playbackProgress.value = 0f
+        playbackTime.text = getString(R.string.playback_time_unknown)
+    }
+
+    private fun formatTime(seconds: Double): String {
+        val total = seconds.toInt()
+        val hours = total / 3600
+        val minutes = (total % 3600) / 60
+        val secs = total % 60
+        return if (hours > 0) {
+            String.format("%d:%02d:%02d", hours, minutes, secs)
+        } else {
+            String.format("%02d:%02d", minutes, secs)
         }
     }
 
@@ -242,6 +439,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     showSuccess(getString(R.string.success_sent, sharedUrl))
                     loadPlaylist()
+                    fetchStateImmediate()
                 }
             } catch (e: Exception) {
                 runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
@@ -274,6 +472,7 @@ class MainActivity : AppCompatActivity() {
                     if (refreshPlaylist) {
                         loadPlaylist()
                     }
+                    fetchStateImmediate()
                 }
             } catch (e: Exception) {
                 runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
@@ -334,6 +533,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     showSuccess(getString(R.string.success_control, ACTION_PLAY_INDEX))
                     loadPlaylist()
+                    fetchStateImmediate()
                 }
             } catch (e: Exception) {
                 runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
@@ -359,6 +559,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     showSuccess(getString(R.string.playlist_removed))
                     loadPlaylist()
+                    fetchStateImmediate()
                 }
             } catch (e: Exception) {
                 runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
@@ -510,7 +711,9 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_VOLUME_UP = "volume_up"
         private const val ACTION_VOLUME_DOWN = "volume_down"
         private const val ACTION_TOGGLE_MUTE = "toggle_mute"
+        private const val ACTION_SEEK = "seek"
 
         private const val VOLUME_THROTTLE_MS = 120L
+        private const val STATE_POLL_INTERVAL_MS = 1000L
     }
 }

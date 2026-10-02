@@ -19,6 +19,9 @@
     <string name="drawer_close">Fermer le menu</string>
     <string name="success_sent">Envoyé : %1$s</string>
     <string name="success_control">Commande %1$s envoyée</string>
+    <string name="playback_progress_desc">Progression de la lecture</string>
+    <string name="playback_time_unknown">--:--</string>
+    <string name="playback_time_format">%1$s / %2$s</string>
     <string name="playlist_section_label">Liste de lecture</string>
     <string name="playlist_empty">Liste de lecture vide</string>
     <string name="playlist_remove">Retirer de la liste de lecture</string>

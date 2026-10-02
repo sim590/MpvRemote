@@ -22,6 +22,9 @@
     <string name="drawer_close">Close menu</string>
     <string name="success_sent">Sent: %1$s</string>
     <string name="success_control">%1$s command sent</string>
+    <string name="playback_progress_desc">Playback progress</string>
+    <string name="playback_time_unknown">--:--</string>
+    <string name="playback_time_format">%1$s / %2$s</string>
     <string name="playlist_section_label">Playlist</string>
     <string name="playlist_empty">Playlist empty</string>
     <string name="playlist_remove">Remove from playlist</string>

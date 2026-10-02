@@ -25,7 +25,8 @@ The relay also accepts ``POST /control`` for safe, predefined actions
 pause``), ``toggle_mute`` (``cycle mute``, which reports the new mute
 state as ``muted`` and shows an on-screen indicator),
 ``volume_up``/``volume_down`` (``osd-msg-bar add volume 5`` /
-``osd-msg-bar add volume -5``, which trigger MPV's native OSD bar),
+``osd-msg-bar add volume -5``), ``seek`` (``osd-msg-bar seek
+<position> absolute``, to jump to an absolute position in seconds) and
 ``next``/``previous`` (``playlist-next weak`` / ``playlist-prev weak``),
 ``stop`` (``stop keep-playlist``, which remembers the stopped index so
 that ``next``/``previous`` can resume from it with
@@ -36,18 +37,24 @@ that ``next``/``previous`` can resume from it with
 a ``play_index``, a ``remove_index`` or a ``clear`` forgets the
 remembered index.
 
-The volume actions use the ``osd-msg-bar`` prefix: MPV's native way to
-apply a property change and show its OSD bar (value included) in a
-single command, so no separate property read or ``show-text`` is needed.
-The mute indicator is still sent with ``show-text`` and a literal text
-built by the relay (``Mute: on``/``Mute: off``), because MPV does not
-expand ``${mute}`` in commands sent over IPC; it is cosmetic and never
-fails the request.
+The volume and seek actions use the ``osd-msg-bar`` prefix: MPV's native
+way to apply a property change and show its OSD bar (value included) in
+a single command, so no separate property read or ``show-text`` is
+needed. The mute indicator is still sent with ``show-text`` and a
+literal text built by the relay (``Mute: on``/``Mute: off``), because
+MPV does not expand ``${mute}`` in commands sent over IPC; it is
+cosmetic and never fails the request.
 
 ``POST /playlist`` returns the current playlist as JSON: the current
 position, whether MPV is idle, and one object per entry with its
 ``index``, ``title`` (empty when MPV does not know it yet),
 ``filename``, ``current`` and ``playing`` fields.
+
+``POST /state`` returns a lightweight playback state without reading the
+whole playlist: ``idle_active``, ``playlist_pos``, ``pause``,
+``time_pos`` and ``duration`` (the last two are ``null`` when unknown,
+for example while idle). All the values are read on a single IPC
+connection.
 
 Examples:
 
@@ -100,10 +107,10 @@ CONTROL_ACTIONS = {
 }
 
 # All accepted POST /control action names. "play_index",
-# "remove_index" and "toggle_mute" are handled separately because their
-# reply depends on the request (or on a read-back property).
+# "remove_index", "toggle_mute" and "seek" are handled separately
+# because their command depends on the request.
 CONTROL_ACTION_NAMES = frozenset(CONTROL_ACTIONS) | {
-    "play_index", "remove_index", "toggle_mute"}
+    "play_index", "remove_index", "toggle_mute", "seek"}
 
 
 def is_valid_url(value):
@@ -329,11 +336,13 @@ class RelayHandler(BaseHTTPRequestHandler):
                              "\"append\": false} ; POST /control  "
                              "{\"action\": \"toggle_pause|toggle_mute|"
                              "volume_up|volume_down|next|previous|"
-                             "stop|clear|play_index|remove_index\", "
+                             "stop|clear|play_index|remove_index|seek\", "
                              "\"socket\": "
-                             "\"/chemin/optionnel\", \"index\": 0} ; "
+                             "\"/chemin/optionnel\", \"index\": 0, "
+                             "\"position\": 0} ; "
                              "POST /playlist  {\"socket\": "
-                             "\"/chemin/optionnel\"}",
+                             "\"/chemin/optionnel\"} ; POST /state  "
+                             "{\"socket\": \"/chemin/optionnel\"}",
                 },
             )
         else:
@@ -341,7 +350,7 @@ class RelayHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = self._route()
-        if route not in ("/play", "/control", "/playlist"):
+        if route not in ("/play", "/control", "/playlist", "/state"):
             self._send_json(404, {"error": "route inconnue"})
             return
 
@@ -367,6 +376,8 @@ class RelayHandler(BaseHTTPRequestHandler):
             self._handle_play(data)
         elif route == "/playlist":
             self._handle_playlist(data)
+        elif route == "/state":
+            self._handle_state(data)
         else:
             self._handle_control(data)
 
@@ -533,6 +544,75 @@ class RelayHandler(BaseHTTPRequestHandler):
             "items": items,
         })
 
+    def _handle_state(self, data):
+        socket_path = data.get("socket") or self._server.default_socket
+        if not is_valid_socket_path(socket_path):
+            self._send_json(
+                400, {"error": "\"socket\" doit être un chemin absolu"})
+            return
+
+        # All the reads go through a single connection. time-pos and
+        # duration may be "property unavailable" (while idle, or for a
+        # stream without a known duration): that yields null, not an
+        # error. Any other failure is a 502.
+        reads = [
+            ("lire time-pos", "time-pos"),
+            ("lire duration", "duration"),
+            ("lire pause", "pause"),
+            ("lire idle-active", "idle-active"),
+            ("lire playlist-pos", "playlist-pos"),
+        ]
+        replies = {}
+        step = "lire time-pos"
+        try:
+            with _MpvConnection(socket_path, self._server.mpv_timeout) as conn:
+                for step, name in reads:
+                    reply = conn.command(["get_property", name])
+                    if reply.get("error") != "success":
+                        if (name in ("time-pos", "duration")
+                                and reply.get("error")
+                                == "property unavailable"):
+                            replies[name] = None
+                            continue
+                        self._send_ipc_error(step, reply)
+                        return
+                    replies[name] = reply.get("data")
+        except OSError as exc:
+            LOG.warning("étape \"%s\" : prise MPV injoignable (%s) : %s",
+                        step, socket_path, exc)
+            self._send_json(
+                502,
+                {"error": "prise MPV injoignable",
+                 "step": step,
+                 "detail": str(exc)},
+            )
+            return
+
+        time_pos = replies["time-pos"]
+        if isinstance(time_pos, bool) or not isinstance(time_pos, (int, float)):
+            time_pos = None
+        else:
+            time_pos = float(time_pos)
+        duration = replies["duration"]
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)):
+            duration = None
+        else:
+            duration = float(duration)
+        pause = replies["pause"]
+        idle_active = replies["idle-active"]
+        playlist_pos = replies["playlist-pos"]
+        self._send_json(200, {
+            "status": "ok",
+            "idle_active": idle_active if isinstance(idle_active, bool) else False,
+            "playlist_pos": (playlist_pos
+                             if isinstance(playlist_pos, int)
+                             and not isinstance(playlist_pos, bool)
+                             else -1),
+            "pause": pause if isinstance(pause, bool) else False,
+            "time_pos": time_pos,
+            "duration": duration,
+        })
+
     def _send_ipc_error(self, step, reply):
         """Send a 502 for an MPV command that did not succeed."""
         LOG.warning("étape \"%s\" : MPV a rejeté la commande : %s",
@@ -540,7 +620,6 @@ class RelayHandler(BaseHTTPRequestHandler):
         self._send_json(502, {"error": "MPV a rejeté la commande",
                               "step": step,
                               "detail": reply.get("error", "inconnu")})
-
     def _handle_control(self, data):
         action = data.get("action")
         socket_path = data.get("socket") or self._server.default_socket
@@ -566,6 +645,8 @@ class RelayHandler(BaseHTTPRequestHandler):
             self._control_remove_index(socket_path, data)
         elif action == "toggle_mute":
             self._control_toggle_mute(socket_path)
+        elif action == "seek":
+            self._control_seek(socket_path, data)
         elif action == "clear":
             # Empty the playlist and forget any pending resume position.
             if not self._run_mpv_steps(
@@ -618,6 +699,27 @@ class RelayHandler(BaseHTTPRequestHandler):
         if not self._run_mpv_steps(
                 socket_path,
                 [("retirer l'entrée", ["playlist-remove", index])]):
+            return
+        self._send_json(200, {"status": "ok", "error": "success"})
+
+    def _control_seek(self, socket_path, data):
+        """Seek to an absolute position in seconds and show MPV's native
+        OSD bar.
+
+        The value is passed as-is (MPV accepts floats). The resume memory
+        is unrelated to the current position, so it is left untouched."""
+        position = data.get("position")
+        if (isinstance(position, bool)
+                or not isinstance(position, (int, float))
+                or position < 0):
+            self._send_json(
+                400,
+                {"error": "\"position\" doit être un nombre positif ou nul"})
+            return
+        if not self._run_mpv_steps(
+                socket_path,
+                [("déplacer la lecture",
+                  ["osd-msg-bar", "seek", position, "absolute"])]):
             return
         self._send_json(200, {"status": "ok", "error": "success"})
 

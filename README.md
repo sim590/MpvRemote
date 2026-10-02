@@ -6,6 +6,8 @@ MpvRemote lets you control [MPV](https://mpv.io) on your computer from an Androi
 
 ## What you can do
 
+<img src="showcase.png" align="right" width="240" alt="MpvRemote app screenshot">
+
 From the Android app:
 
 - **Share a URL** - In any app (browser, YouTube, etc.), choose *Share* -> **MpvRemote**. The video is sent to MPV on your computer.
@@ -19,6 +21,8 @@ From the Android app:
 - **Mute** - Toggle mute with the dedicated button.
 - **Playlist** - View the current queue under the controls. The current item is highlighted. Tap an entry to play it, or tap the X to remove it. Pull down to refresh the list. Titles are resolved automatically when possible; otherwise the URL is shown. MPV's own title takes priority once playback starts.
 - **Clear playlist** - Empty the queue.
+
+<br clear="all">
 
 ## Components
 

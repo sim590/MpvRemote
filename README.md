@@ -129,6 +129,28 @@ The recommended way to use MpvRemote is over your home Wi-Fi.
 
 Make sure your phone and computer are on the same network.
 
+## On the Steam Deck
+
+Make sure you have MPV installed. Then, place `mpvremote_server.py` in `~/bin` and write the following script in `~/bin/mpv-server.sh`:
+
+```sh
+#!/bin/sh
+unset LD_PRELOAD
+
+socket=/tmp/mpv.socket
+
+python ~/bin/mpvremote_server.py --host 0.0.0.0 --socket $socket &
+
+rm -f $socket
+mpv --idle=yes --force-window=immediate --input-ipc-server=$socket
+```
+
+Indeed, you can change the paths to your liking.
+
+Afterwards, in Gaming mode, add a new shortcut to run `~/bin/mpv-server.sh`. The relay will start in the background, and MPV will open in a window.
+
+Connect your Steam Deck to your TV and enjoy your videos with your phone as a remote control!
+
 ## Security note
 
 Encryption and authentication are not implemented yet, and they are planned for a future version. Until then, use MpvRemote on your local network only.

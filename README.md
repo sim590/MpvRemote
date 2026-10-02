@@ -131,8 +131,10 @@ Make sure your phone and computer are on the same network.
 
 ## Security note
 
-- By default, the relay only listens on `127.0.0.1`. This is intentional: nothing else on the network can reach it.
-- With `--host 0.0.0.0`, the relay is exposed to your local network with no encryption or authentication. Only use this on a trusted private network.
+Encryption and authentication are not implemented yet, and they are planned for a future version. Until then, use MpvRemote on your local network only.
+
+- By default, the relay only listens on `127.0.0.1`, so nothing outside your machine can reach it.
+- With `--host 0.0.0.0`, the relay is exposed to your local network in clear text. Only use this on a trusted private network.
 - The relay only accepts `http`/`https` URLs and limits request body size.
 
 See `CONTRIBUTING.md` for build and development instructions.

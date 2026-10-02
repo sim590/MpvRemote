@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="nav_item_selected">#424242</color>
+    <color name="playlist_item_current">#424242</color>
+    <color name="playlist_item_subtitle">#BDBDBD</color>
 </resources>

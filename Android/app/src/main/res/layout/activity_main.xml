@@ -110,7 +110,38 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="@string/control_clear"
+                    android:layout_marginBottom="16dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/playlist_section_label"
+                    android:textAppearance="?attr/textAppearanceBodyLarge"
+                    android:textStyle="bold"
                     android:layout_marginBottom="8dp" />
+
+                <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+                    android:id="@+id/playlist_swipe_refresh"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1">
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/playlist_recycler_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+
+                </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+                <TextView
+                    android:id="@+id/playlist_empty_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:padding="16dp"
+                    android:text="@string/playlist_empty"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:visibility="gone" />
 
             </LinearLayout>
 

@@ -16,6 +16,11 @@
     <string name="drawer_close">Fermer le menu</string>
     <string name="success_sent">Envoyé : %1$s</string>
     <string name="success_control">Commande %1$s envoyée</string>
+    <string name="playlist_section_label">Liste de lecture</string>
+    <string name="playlist_empty">Liste de lecture vide</string>
+    <string name="playlist_remove">Retirer de la liste de lecture</string>
+    <string name="playlist_removed">Retiré de la liste de lecture</string>
+    <string name="error_playlist">Erreur de chargement de la liste de lecture : %1$s</string>
     <string name="error_send">Erreur : %1$s</string>
     <string name="error_no_url">Aucune URL reçue</string>
     <string name="error_empty_relay">L\'URL du relais est vide</string>

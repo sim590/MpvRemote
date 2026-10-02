@@ -7,6 +7,7 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.addCallback
 import androidx.appcompat.app.ActionBarDrawerToggle
@@ -14,6 +15,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
 import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.navigation.NavigationView
 import org.json.JSONObject
@@ -39,6 +43,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var controlStop: ImageButton
     private lateinit var controlClear: Button
 
+    private lateinit var playlistSwipeRefresh: SwipeRefreshLayout
+    private lateinit var playlistRecyclerView: RecyclerView
+    private lateinit var playlistEmptyView: TextView
+    private lateinit var playlistAdapter: PlaylistAdapter
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -59,7 +68,12 @@ class MainActivity : AppCompatActivity() {
         controlStop = findViewById(R.id.control_stop)
         controlClear = findViewById(R.id.control_clear)
 
+        playlistSwipeRefresh = findViewById(R.id.playlist_swipe_refresh)
+        playlistRecyclerView = findViewById(R.id.playlist_recycler_view)
+        playlistEmptyView = findViewById(R.id.playlist_empty_view)
+
         setupDrawer()
+        setupPlaylist()
         showSection(Section.REMOTE)
         loadSettings()
         setupListeners()
@@ -108,6 +122,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupPlaylist() {
+        playlistAdapter = PlaylistAdapter(
+            onItemClick = { item -> playPlaylistItem(item) },
+            onRemove = { item -> removePlaylistItem(item) }
+        )
+        playlistRecyclerView.layoutManager = LinearLayoutManager(this)
+        playlistRecyclerView.adapter = playlistAdapter
+        playlistSwipeRefresh.setOnRefreshListener { loadPlaylist() }
+    }
+
     private fun setupListeners() {
         saveButton.setOnClickListener { saveSettings() }
         controlPlayPause.setOnClickListener { sendControlRequest(ACTION_PLAY_PAUSE) }
@@ -124,6 +148,7 @@ class MainActivity : AppCompatActivity() {
                 settingsSection.visibility = View.GONE
                 supportActionBar?.title = getString(R.string.nav_remote)
                 navigationView.setCheckedItem(R.id.nav_remote)
+                loadPlaylist()
             }
             Section.SETTINGS -> {
                 remoteSection.visibility = View.GONE
@@ -176,7 +201,10 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 sendPlayRequest(settings.baseUrl, settings.socketPath, settings.append, sharedUrl)
-                runOnUiThread { showSuccess(getString(R.string.success_sent, sharedUrl)) }
+                runOnUiThread {
+                    showSuccess(getString(R.string.success_sent, sharedUrl))
+                    loadPlaylist()
+                }
             } catch (e: Exception) {
                 runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
             }
@@ -197,11 +225,115 @@ class MainActivity : AppCompatActivity() {
                     put("socket", settings.socketPath)
                 }
                 postJson(settings.baseUrl, "/control", payload)
-                runOnUiThread { showSuccess(getString(R.string.success_control, action)) }
+                runOnUiThread {
+                    showSuccess(getString(R.string.success_control, action))
+                    loadPlaylist()
+                }
             } catch (e: Exception) {
                 runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
             }
         }.start()
+    }
+
+    private fun playPlaylistItem(item: PlaylistItem) {
+        val settings = currentSettings()
+        if (settings.baseUrl.isBlank()) {
+            showError(getString(R.string.error_send, getString(R.string.error_empty_relay)))
+            return
+        }
+
+        Thread {
+            try {
+                val payload = JSONObject().apply {
+                    put("action", ACTION_PLAY_INDEX)
+                    put("index", item.index)
+                    put("socket", settings.socketPath)
+                }
+                postJson(settings.baseUrl, "/control", payload)
+                runOnUiThread {
+                    showSuccess(getString(R.string.success_control, ACTION_PLAY_INDEX))
+                    loadPlaylist()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
+            }
+        }.start()
+    }
+
+    private fun removePlaylistItem(item: PlaylistItem) {
+        val settings = currentSettings()
+        if (settings.baseUrl.isBlank()) {
+            showError(getString(R.string.error_send, getString(R.string.error_empty_relay)))
+            return
+        }
+
+        Thread {
+            try {
+                val payload = JSONObject().apply {
+                    put("action", ACTION_REMOVE_INDEX)
+                    put("index", item.index)
+                    put("socket", settings.socketPath)
+                }
+                postJson(settings.baseUrl, "/control", payload)
+                runOnUiThread {
+                    showSuccess(getString(R.string.playlist_removed))
+                    loadPlaylist()
+                }
+            } catch (e: Exception) {
+                runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
+            }
+        }.start()
+    }
+
+    private fun loadPlaylist() {
+        val settings = currentSettings()
+        if (settings.baseUrl.isBlank()) {
+            runOnUiThread {
+                playlistSwipeRefresh.isRefreshing = false
+                playlistAdapter.submitList(emptyList())
+                playlistEmptyView.visibility = View.VISIBLE
+            }
+            return
+        }
+
+        Thread {
+            try {
+                val payload = JSONObject().apply {
+                    put("socket", settings.socketPath)
+                }
+                val body = postJsonForResponse(settings.baseUrl, "/playlist", payload)
+                val response = JSONObject(body)
+                val items = parsePlaylist(response)
+                runOnUiThread {
+                    playlistAdapter.submitList(items)
+                    playlistEmptyView.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+                    playlistSwipeRefresh.isRefreshing = false
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    playlistSwipeRefresh.isRefreshing = false
+                    showError(getString(R.string.error_playlist, e.message ?: e.javaClass.simpleName))
+                }
+            }
+        }.start()
+    }
+
+    private fun parsePlaylist(response: JSONObject): List<PlaylistItem> {
+        val items = response.optJSONArray("items") ?: return emptyList()
+        val result = mutableListOf<PlaylistItem>()
+        for (i in 0 until items.length()) {
+            val obj = items.getJSONObject(i)
+            result.add(
+                PlaylistItem(
+                    index = obj.optInt("index", i),
+                    title = obj.optString("title", ""),
+                    filename = obj.optString("filename", ""),
+                    current = obj.optBoolean("current", false),
+                    playing = obj.optBoolean("playing", false)
+                )
+            )
+        }
+        return result
     }
 
     private fun sendPlayRequest(
@@ -224,6 +356,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun postJson(baseUrl: String, endpointSuffix: String, payload: JSONObject) {
+        postJsonForResponse(baseUrl, endpointSuffix, payload)
+    }
+
+    private fun postJsonForResponse(
+        baseUrl: String,
+        endpointSuffix: String,
+        payload: JSONObject
+    ): String {
         val endpoint = baseUrl.trimEnd('/') + endpointSuffix
         val connection = URL(endpoint).openConnection() as HttpURLConnection
 
@@ -240,10 +380,12 @@ class MainActivity : AppCompatActivity() {
             }
 
             val responseCode = connection.responseCode
+            val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
             if (responseCode !in 200..299) {
-                val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                throw RuntimeException("HTTP $responseCode${if (errorBody.isNotBlank()) ": $errorBody" else ""}")
+                throw RuntimeException("HTTP $responseCode${if (body.isNotBlank()) ": $body" else ""}")
             }
+            return body
         } finally {
             connection.disconnect()
         }
@@ -282,5 +424,7 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_NEXT = "next"
         private const val ACTION_STOP = "stop"
         private const val ACTION_CLEAR = "clear"
+        private const val ACTION_PLAY_INDEX = "play_index"
+        private const val ACTION_REMOVE_INDEX = "remove_index"
     }
 }

@@ -25,9 +25,17 @@ The relay also accepts ``POST /control`` for safe, predefined actions
 pause``), ``next``/``previous`` (``playlist-next weak`` /
 ``playlist-prev weak``), ``stop`` (``stop keep-playlist``, which
 remembers the stopped index so that ``next``/``previous`` can resume
-from it with ``playlist-play-index`` while MPV is idle) and ``clear``
-(``stop``, which empties the playlist). A new ``POST /play`` or a
-``clear`` forgets the remembered index.
+from it with ``playlist-play-index`` while MPV is idle),
+``play_index`` (``playlist-play-index <index>``, to jump to a given
+entry), ``remove_index`` (``playlist-remove <index>``, to drop an
+entry) and ``clear`` (``stop``, which empties the playlist). A new
+``POST /play``, a ``play_index``, a ``remove_index`` or a ``clear``
+forgets the remembered index.
+
+``POST /playlist`` returns the current playlist as JSON: the current
+position, whether MPV is idle, and one object per entry with its
+``index``, ``title`` (empty when MPV does not know it yet),
+``filename``, ``current`` and ``playing`` fields.
 
 Examples:
 
@@ -36,6 +44,8 @@ Examples:
         -d '{"url": "https://example.com/video.mp4"}'
     curl -X POST http://127.0.0.1:8765/control \\
         -d '{"action": "toggle_pause"}'
+    curl -X POST http://127.0.0.1:8765/playlist \\
+        -d '{"socket": "/tmp/mpv.socket"}'
 """
 
 import argparse
@@ -72,6 +82,12 @@ CONTROL_ACTIONS = {
     "clear": [("vider la file de lecture", ["stop"])],
 }
 
+# All accepted POST /control action names. "play_index" and
+# "remove_index" are handled separately because their command depends on
+# the request.
+CONTROL_ACTION_NAMES = frozenset(CONTROL_ACTIONS) | {
+    "play_index", "remove_index"}
+
 
 def is_valid_url(value):
     """Return True if ``value`` is an http/https URL with a host."""
@@ -87,65 +103,104 @@ def is_valid_socket_path(value):
     return isinstance(value, str) and os.path.isabs(value)
 
 
+def _is_transport_error(reply):
+    """Return True if ``reply`` reports a transport-level failure (timeout
+    or closed connection) rather than a command result."""
+    return reply.get("error") in ("timeout", "connection closed")
+
+
+def _recv_reply(sock, request_id, deadline):
+    """Read JSON lines from ``sock`` until the reply carrying
+    ``request_id`` (with an ``error`` field) is found, ignoring
+    asynchronous events and replies to other requests. Several lines may
+    arrive in a single ``recv``. Returns the reply dictionary, or an
+    error dictionary on timeout / closed connection."""
+    buffer = b""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {"error": "timeout", "request_id": request_id}
+        sock.settimeout(remaining)
+        try:
+            chunk = sock.recv(4096)
+        except socket.timeout:
+            return {"error": "timeout", "request_id": request_id}
+        except ConnectionError:
+            return {"error": "connection closed", "request_id": request_id}
+        if not chunk:
+            # MPV closed the connection without replying.
+            return {"error": "connection closed", "request_id": request_id}
+        buffer += chunk
+        # Process every complete JSON line received so far.
+        while b"\n" in buffer:
+            raw_line, buffer = buffer.split(b"\n", 1)
+            if not raw_line.strip():
+                continue
+            try:
+                obj = json.loads(raw_line.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue  # unparseable line: keep going
+            # Only the response carrying our request_id and containing an
+            # "error" field is of interest.
+            if (isinstance(obj, dict)
+                    and obj.get("request_id") == request_id
+                    and "error" in obj):
+                return obj
+
+
+class _MpvConnection:
+    """A single Unix-socket connection to MPV's JSON IPC.
+
+    Several commands can be sent sequentially on the same connection,
+    each carrying its own ``request_id``; asynchronous events and replies
+    to other requests are ignored (see ``_recv_reply``)."""
+
+    def __init__(self, socket_path, timeout=DEFAULT_MPV_TIMEOUT):
+        self._timeout = timeout
+        self._seq = 0
+        self._base = int(time.time() * 1000)
+        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self._sock.settimeout(timeout)
+            self._sock.connect(socket_path)
+        except BaseException:
+            self._sock.close()
+            raise
+
+    def command(self, command):
+        """Send one command and return MPV's reply (or an error dictionary
+        such as ``{"error": "timeout"}``)."""
+        request_id = self._base + self._seq
+        self._seq += 1
+        line = (json.dumps({"command": command,
+                            "request_id": request_id}) + "\n").encode("utf-8")
+        self._sock.sendall(line)
+        return _recv_reply(self._sock, request_id,
+                           time.monotonic() + self._timeout)
+
+    def close(self):
+        self._sock.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
 def send_mpv_command(socket_path, command, timeout=DEFAULT_MPV_TIMEOUT):
     """Send a JSON newline IPC command to MPV's Unix socket.
 
-    Each command carries a unique ``request_id``. The relay reads the
-    JSON lines it receives until it finds the response carrying that
-    ``request_id`` (with an ``error`` field): MPV's asynchronous events
-    and responses to other requests are ignored. Several lines may
-    arrive in a single ``recv``.
+    The command carries a unique ``request_id``; the reply is correlated
+    by that id (asynchronous events and replies to other requests are
+    ignored, and several lines may arrive in a single ``recv``).
 
     Returns MPV's response dictionary, or an error dictionary
     ``{"error": ...}`` if the socket is closed or the timeout expires.
     Raises ``OSError`` if the socket is unreachable.
     """
-    request_id = int(time.time() * 1000)
-    payload = {"command": command, "request_id": request_id}
-    line = (json.dumps(payload) + "\n").encode("utf-8")
-
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.settimeout(timeout)
-        sock.connect(socket_path)
-        sock.sendall(line)
-
-        deadline = time.monotonic() + timeout
-        try:
-            buffer = b""
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return {"error": "timeout", "request_id": request_id}
-                sock.settimeout(remaining)
-                chunk = sock.recv(4096)
-                if not chunk:
-                    # MPV closed the connection without replying.
-                    return {"error": "connection closed",
-                            "request_id": request_id}
-                buffer += chunk
-                # Process every complete JSON line received so far.
-                while b"\n" in buffer:
-                    raw_line, buffer = buffer.split(b"\n", 1)
-                    if not raw_line.strip():
-                        continue
-                    try:
-                        obj = json.loads(raw_line.decode("utf-8"))
-                    except (UnicodeDecodeError, json.JSONDecodeError):
-                        continue  # unparseable line: keep going
-                    # Only the response carrying our request_id and
-                    # containing an "error" field is of interest.
-                    if (isinstance(obj, dict)
-                            and obj.get("request_id") == request_id
-                            and "error" in obj):
-                        return obj
-        except socket.timeout:
-            return {"error": "timeout", "request_id": request_id}
-        except ConnectionError:
-            return {"error": "connection closed",
-                    "request_id": request_id}
-    finally:
-        sock.close()
+    with _MpvConnection(socket_path, timeout) as conn:
+        return conn.command(command)
 
 
 class RelayServer(ThreadingHTTPServer):
@@ -256,7 +311,11 @@ class RelayHandler(BaseHTTPRequestHandler):
                              "\"socket\": \"/chemin/optionnel\", "
                              "\"append\": false} ; POST /control  "
                              "{\"action\": \"toggle_pause|next|previous|"
-                             "stop|clear\", \"socket\": \"/chemin/optionnel\"}",
+                             "stop|clear|play_index|remove_index\", "
+                             "\"socket\": "
+                             "\"/chemin/optionnel\", \"index\": 0} ; "
+                             "POST /playlist  {\"socket\": "
+                             "\"/chemin/optionnel\"}",
                 },
             )
         else:
@@ -264,7 +323,7 @@ class RelayHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = self._route()
-        if route not in ("/play", "/control"):
+        if route not in ("/play", "/control", "/playlist"):
             self._send_json(404, {"error": "route inconnue"})
             return
 
@@ -288,6 +347,8 @@ class RelayHandler(BaseHTTPRequestHandler):
 
         if route == "/play":
             self._handle_play(data)
+        elif route == "/playlist":
+            self._handle_playlist(data)
         else:
             self._handle_control(data)
 
@@ -375,14 +436,101 @@ class RelayHandler(BaseHTTPRequestHandler):
             return
         self._send_json(200, {"status": "ok", "error": "success"})
 
+    def _handle_playlist(self, data):
+        socket_path = data.get("socket") or self._server.default_socket
+        if not is_valid_socket_path(socket_path):
+            self._send_json(
+                400, {"error": "\"socket\" doit être un chemin absolu"})
+            return
+
+        # All the queries go through a single connection, so the playlist
+        # cannot change between them.
+        step = "lire la liste de lecture"
+        try:
+            with _MpvConnection(socket_path, self._server.mpv_timeout) as conn:
+                reply = conn.command(["get_property", "playlist"])
+                if reply.get("error") != "success":
+                    self._send_ipc_error(step, reply)
+                    return
+                raw_items = reply.get("data")
+                if not isinstance(raw_items, list):
+                    self._send_ipc_error(step, {"error": "réponse invalide"})
+                    return
+
+                step = "lire les titres"
+                titles = []
+                for index in range(len(raw_items)):
+                    title_reply = conn.command(
+                        ["get_property", "playlist/%d/title" % index])
+                    # A title may be "property unavailable" until the
+                    # entry has been played at least once: this is not
+                    # fatal, the title simply falls back to "".
+                    if _is_transport_error(title_reply):
+                        self._send_ipc_error(step, title_reply)
+                        return
+                    title = title_reply.get("data")
+                    titles.append(title if isinstance(title, str) else "")
+
+                step = "lire playlist-pos"
+                pos_reply = conn.command(["get_property", "playlist-pos"])
+                if pos_reply.get("error") != "success":
+                    self._send_ipc_error(step, pos_reply)
+                    return
+
+                step = "lire idle-active"
+                idle_reply = conn.command(["get_property", "idle-active"])
+                if idle_reply.get("error") != "success":
+                    self._send_ipc_error(step, idle_reply)
+                    return
+        except OSError as exc:
+            LOG.warning("étape \"%s\" : prise MPV injoignable (%s) : %s",
+                        step, socket_path, exc)
+            self._send_json(
+                502,
+                {"error": "prise MPV injoignable",
+                 "step": step,
+                 "detail": str(exc)},
+            )
+            return
+
+        items = []
+        for index, entry in enumerate(raw_items):
+            if not isinstance(entry, dict):
+                entry = {}
+            filename = entry.get("filename")
+            items.append({
+                "index": index,
+                "title": titles[index],
+                "filename": filename if isinstance(filename, str) else "",
+                "current": bool(entry.get("current", False)),
+                "playing": bool(entry.get("playing", False)),
+            })
+        playlist_pos = pos_reply.get("data")
+        if isinstance(playlist_pos, bool) or not isinstance(playlist_pos, int):
+            playlist_pos = -1
+        self._send_json(200, {
+            "status": "ok",
+            "playlist_pos": playlist_pos,
+            "idle_active": bool(idle_reply.get("data")),
+            "items": items,
+        })
+
+    def _send_ipc_error(self, step, reply):
+        """Send a 502 for an MPV command that did not succeed."""
+        LOG.warning("étape \"%s\" : MPV a rejeté la commande : %s",
+                    step, reply.get("error"))
+        self._send_json(502, {"error": "MPV a rejeté la commande",
+                              "step": step,
+                              "detail": reply.get("error", "inconnu")})
+
     def _handle_control(self, data):
         action = data.get("action")
         socket_path = data.get("socket") or self._server.default_socket
-        if not isinstance(action, str) or action not in CONTROL_ACTIONS:
+        if not isinstance(action, str) or action not in CONTROL_ACTION_NAMES:
             self._send_json(
                 400,
                 {"error": "\"action\" inconnue ou manquante",
-                 "allowed": sorted(CONTROL_ACTIONS)},
+                 "allowed": sorted(CONTROL_ACTION_NAMES)},
             )
             return
         if not is_valid_socket_path(socket_path):
@@ -394,6 +542,10 @@ class RelayHandler(BaseHTTPRequestHandler):
             self._control_stop(socket_path)
         elif action in ("next", "previous"):
             self._control_skip(socket_path, action)
+        elif action == "play_index":
+            self._control_play_index(socket_path, data)
+        elif action == "remove_index":
+            self._control_remove_index(socket_path, data)
         elif action == "clear":
             # Empty the playlist and forget any pending resume position.
             if not self._run_mpv_steps(
@@ -407,6 +559,47 @@ class RelayHandler(BaseHTTPRequestHandler):
                     socket_path, list(CONTROL_ACTIONS[action])):
                 return
             self._send_json(200, {"status": "ok", "error": "success"})
+
+    def _control_play_index(self, socket_path, data):
+        """Play a specific playlist entry by index, forgetting any pending
+        resume position (like ``POST /play``)."""
+        index = data.get("index")
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            self._send_json(
+                400,
+                {"error": "\"index\" doit être un entier positif ou nul"})
+            return
+        # A direct play request invalidates any pending resume position.
+        self._server.clear_resume(socket_path)
+        if not self._run_mpv_steps(
+                socket_path,
+                [("jouer l'entrée", ["playlist-play-index", index])]):
+            return
+        self._send_json(200, {"status": "ok", "error": "success"})
+
+    def _control_remove_index(self, socket_path, data):
+        """Remove a playlist entry by index, forgetting any pending
+        resume position (indexes may shift).
+
+        MPV semantics: removing an entry before the current one shifts
+        the current index down automatically; removing the current entry
+        moves playback to the next available one (or empties the playlist
+        if it was the last). An out-of-range index makes MPV reply with
+        "error running command", which bubbles up as a 502 with the step.
+        """
+        index = data.get("index")
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            self._send_json(
+                400,
+                {"error": "\"index\" doit être un entier positif ou nul"})
+            return
+        # Removing an entry can shift the indexes: forget the memory.
+        self._server.clear_resume(socket_path)
+        if not self._run_mpv_steps(
+                socket_path,
+                [("retirer l'entrée", ["playlist-remove", index])]):
+            return
+        self._send_json(200, {"status": "ok", "error": "success"})
 
     def _control_stop(self, socket_path):
         """Stop playback but keep the playlist, remembering the current

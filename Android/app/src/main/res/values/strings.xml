@@ -13,6 +13,10 @@
     <string name="control_play_pause_desc">Play / Pause</string>
     <string name="control_next_desc">Next track</string>
     <string name="settings_saved">Settings saved</string>
+    <string name="nav_remote">Remote</string>
+    <string name="nav_settings">Settings</string>
+    <string name="drawer_open">Open menu</string>
+    <string name="drawer_close">Close menu</string>
     <string name="status_idle">Ready</string>
     <string name="sending">Sending %1$s…</string>
     <string name="success_sent">Sent: %1$s</string>

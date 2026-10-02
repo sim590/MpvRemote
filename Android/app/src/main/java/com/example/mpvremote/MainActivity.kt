@@ -2,20 +2,33 @@ package com.example.mpvremote
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.addCallback
+import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
+import androidx.core.view.GravityCompat
+import androidx.drawerlayout.widget.DrawerLayout
+import com.google.android.material.appbar.MaterialToolbar
+import com.google.android.material.navigation.NavigationView
 import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 
 class MainActivity : AppCompatActivity() {
+
+    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var toolbar: MaterialToolbar
+    private lateinit var navigationView: NavigationView
+    private lateinit var remoteSection: View
+    private lateinit var settingsSection: View
 
     private lateinit var baseUrlInput: EditText
     private lateinit var socketPathInput: EditText
@@ -32,6 +45,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        drawerLayout = findViewById(R.id.drawer_layout)
+        toolbar = findViewById(R.id.toolbar)
+        navigationView = findViewById(R.id.navigation_view)
+        remoteSection = findViewById(R.id.remote_section)
+        settingsSection = findViewById(R.id.settings_section)
+
         baseUrlInput = findViewById(R.id.base_url_input)
         socketPathInput = findViewById(R.id.socket_path_input)
         appendCheckbox = findViewById(R.id.append_checkbox)
@@ -43,14 +62,19 @@ class MainActivity : AppCompatActivity() {
         controlClear = findViewById(R.id.control_clear)
         statusText = findViewById(R.id.status_text)
 
+        setupDrawer()
+        showSection(Section.REMOTE)
         loadSettings()
+        setupListeners()
 
-        saveButton.setOnClickListener { saveSettings() }
-        controlPlayPause.setOnClickListener { sendControlRequest(ACTION_PLAY_PAUSE) }
-        controlPrevious.setOnClickListener { sendControlRequest(ACTION_PREVIOUS) }
-        controlNext.setOnClickListener { sendControlRequest(ACTION_NEXT) }
-        controlStop.setOnClickListener { sendControlRequest(ACTION_STOP) }
-        controlClear.setOnClickListener { sendControlRequest(ACTION_CLEAR) }
+        onBackPressedDispatcher.addCallback(this) {
+            if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+                drawerLayout.closeDrawer(GravityCompat.START)
+            } else {
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+            }
+        }
 
         if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             handleSendIntent(intent)
@@ -60,7 +84,56 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            showSection(Section.REMOTE)
             handleSendIntent(intent)
+        }
+    }
+
+    private fun setupDrawer() {
+        setSupportActionBar(toolbar)
+        val toggle = ActionBarDrawerToggle(
+            this,
+            drawerLayout,
+            toolbar,
+            R.string.drawer_open,
+            R.string.drawer_close
+        )
+        drawerLayout.addDrawerListener(toggle)
+        toggle.syncState()
+
+        navigationView.setNavigationItemSelectedListener { menuItem ->
+            when (menuItem.itemId) {
+                R.id.nav_remote -> showSection(Section.REMOTE)
+                R.id.nav_settings -> showSection(Section.SETTINGS)
+            }
+            drawerLayout.closeDrawer(GravityCompat.START)
+            true
+        }
+    }
+
+    private fun setupListeners() {
+        saveButton.setOnClickListener { saveSettings() }
+        controlPlayPause.setOnClickListener { sendControlRequest(ACTION_PLAY_PAUSE) }
+        controlPrevious.setOnClickListener { sendControlRequest(ACTION_PREVIOUS) }
+        controlNext.setOnClickListener { sendControlRequest(ACTION_NEXT) }
+        controlStop.setOnClickListener { sendControlRequest(ACTION_STOP) }
+        controlClear.setOnClickListener { sendControlRequest(ACTION_CLEAR) }
+    }
+
+    private fun showSection(section: Section) {
+        when (section) {
+            Section.REMOTE -> {
+                remoteSection.visibility = View.VISIBLE
+                settingsSection.visibility = View.GONE
+                supportActionBar?.title = getString(R.string.nav_remote)
+                navigationView.setCheckedItem(R.id.nav_remote)
+            }
+            Section.SETTINGS -> {
+                remoteSection.visibility = View.GONE
+                settingsSection.visibility = View.VISIBLE
+                supportActionBar?.title = getString(R.string.nav_settings)
+                navigationView.setCheckedItem(R.id.nav_settings)
+            }
         }
     }
 
@@ -85,6 +158,15 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
     }
 
+    private fun currentSettings(): Settings {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        return Settings(
+            baseUrl = prefs.getString(KEY_BASE_URL, DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL,
+            socketPath = prefs.getString(KEY_SOCKET, DEFAULT_SOCKET) ?: DEFAULT_SOCKET,
+            append = prefs.getBoolean(KEY_APPEND, DEFAULT_APPEND)
+        )
+    }
+
     private fun handleSendIntent(intent: Intent) {
         val sharedUrl = intent.getStringExtra(Intent.EXTRA_TEXT)
         if (sharedUrl.isNullOrBlank()) {
@@ -92,15 +174,12 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val baseUrl = baseUrlInput.text.toString().trim()
-        val socketPath = socketPathInput.text.toString().trim()
-        val append = appendCheckbox.isChecked
-
+        val settings = currentSettings()
         setStatusSending(getString(R.string.sending, sharedUrl))
 
         Thread {
             try {
-                sendPlayRequest(baseUrl, socketPath, append, sharedUrl)
+                sendPlayRequest(settings.baseUrl, settings.socketPath, settings.append, sharedUrl)
                 runOnUiThread { setStatusSuccess(getString(R.string.success_sent, sharedUrl)) }
             } catch (e: Exception) {
                 runOnUiThread { setStatusError(e.message ?: e.javaClass.simpleName) }
@@ -109,13 +188,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendControlRequest(action: String) {
-        val baseUrl = baseUrlInput.text.toString().trim()
-        if (baseUrl.isBlank()) {
+        val settings = currentSettings()
+        if (settings.baseUrl.isBlank()) {
             showError(getString(R.string.error_send, getString(R.string.error_empty_relay)))
             return
         }
-
-        val socketPath = socketPathInput.text.toString().trim()
 
         setStatusSending(getString(R.string.sending_control, action))
 
@@ -123,9 +200,9 @@ class MainActivity : AppCompatActivity() {
             try {
                 val payload = JSONObject().apply {
                     put("action", action)
-                    put("socket", socketPath)
+                    put("socket", settings.socketPath)
                 }
-                postJson(baseUrl, "/control", payload)
+                postJson(settings.baseUrl, "/control", payload)
                 runOnUiThread { setStatusSuccess(getString(R.string.success_control, action)) }
             } catch (e: Exception) {
                 runOnUiThread { setStatusError(e.message ?: e.javaClass.simpleName) }
@@ -200,6 +277,17 @@ class MainActivity : AppCompatActivity() {
         statusText.setTextColor(getColor(R.color.error))
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
+
+    private enum class Section {
+        REMOTE,
+        SETTINGS
+    }
+
+    private data class Settings(
+        val baseUrl: String,
+        val socketPath: String,
+        val append: Boolean
+    )
 
     companion object {
         private const val PREFS_NAME = "MpvRemotePrefs"

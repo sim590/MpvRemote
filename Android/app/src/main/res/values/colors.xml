@@ -7,5 +7,6 @@
     <color name="error">#C62828</color>
     <color name="text_primary">#212121</color>
     <color name="text_secondary">#757575</color>
+    <color name="nav_item_selected">#E6E6E6</color>
     <color name="white">#FFFFFF</color>
 </resources>

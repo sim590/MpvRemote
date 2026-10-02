@@ -10,6 +10,10 @@
     <string name="control_play_pause_desc">Lecture / Pause</string>
     <string name="control_next_desc">Piste suivante</string>
     <string name="settings_saved">Paramètres sauvegardés</string>
+    <string name="nav_remote">Télécommande</string>
+    <string name="nav_settings">Paramètres</string>
+    <string name="drawer_open">Ouvrir le menu</string>
+    <string name="drawer_close">Fermer le menu</string>
     <string name="status_idle">Prêt</string>
     <string name="sending">Envoi de %1$s…</string>
     <string name="success_sent">Envoyé : %1$s</string>

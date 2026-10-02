@@ -1,28 +1,24 @@
 <resources>
-    <string name="app_name">MpvRemote</string>
-    <string name="relay_url_label">URL de base du relais</string>
-    <string name="relay_url_hint">http://10.0.2.2:8765</string>
-    <string name="socket_path_label">Chemin du socket MPV</string>
-    <string name="socket_path_hint">/tmp/mpv.socket</string>
-    <string name="append_checkbox_label">Ajouter à la file (--append)</string>
-    <string name="save_settings">Sauvegarder</string>
-    <string name="controls_section_label">Contrôles</string>
-    <string name="control_play_pause">Play/Pause</string>
-    <string name="control_previous">Précédent</string>
-    <string name="control_next">Suivant</string>
-    <string name="control_clear">Effacer la liste</string>
-    <string name="control_stop">Stop</string>
-    <string name="control_stop_desc">Arrêter la lecture</string>
-    <string name="control_previous_desc">Piste précédente</string>
-    <string name="control_play_pause_desc">Lecture / Pause</string>
-    <string name="control_next_desc">Piste suivante</string>
-    <string name="settings_saved">Paramètres sauvegardés</string>
-    <string name="status_idle">Prêt</string>
-    <string name="sending">Envoi de %1$s…</string>
-    <string name="success_sent">Envoyé : %1$s</string>
-    <string name="sending_control">Envoi de la commande %1$s…</string>
-    <string name="success_control">Commande %1$s envoyée</string>
-    <string name="error_send">Erreur : %1$s</string>
-    <string name="error_no_url">Aucune URL reçue</string>
-    <string name="error_empty_relay">L\'URL du relais est vide</string>
+    <string name="app_name" translatable="false">MpvRemote</string>
+    <string name="relay_url_label">Relay base URL</string>
+    <string name="relay_url_hint" translatable="false">http://10.0.2.2:8765</string>
+    <string name="socket_path_label">MPV socket path</string>
+    <string name="socket_path_hint" translatable="false">/tmp/mpv.socket</string>
+    <string name="append_checkbox_label">Append to playlist (--append)</string>
+    <string name="save_settings">Save</string>
+    <string name="controls_section_label">Controls</string>
+    <string name="control_clear">Clear playlist</string>
+    <string name="control_stop_desc">Stop playback</string>
+    <string name="control_previous_desc">Previous track</string>
+    <string name="control_play_pause_desc">Play / Pause</string>
+    <string name="control_next_desc">Next track</string>
+    <string name="settings_saved">Settings saved</string>
+    <string name="status_idle">Ready</string>
+    <string name="sending">Sending %1$s…</string>
+    <string name="success_sent">Sent: %1$s</string>
+    <string name="sending_control">Sending %1$s command…</string>
+    <string name="success_control">%1$s command sent</string>
+    <string name="error_send">Error: %1$s</string>
+    <string name="error_no_url">No URL received</string>
+    <string name="error_empty_relay">Relay URL is empty</string>
 </resources>

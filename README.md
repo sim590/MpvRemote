@@ -2,7 +2,7 @@
 
 Share an URL, tap the buttons, and enjoy your videos on the big screen.
 
-MpvRemote lets you control [MPV](https://mpv.io) on your computer from an Android phone. Share a video URL from any app, and MpvRemote loads it in MPV. You can also play/pause, skip tracks, stop playback, and clear the playlist from the app.
+MpvRemote lets you control [MPV](https://mpv.io) on your computer from an Android phone. Share a video URL from any app, and MpvRemote loads it in MPV. You can also play/pause, skip tracks, stop playback, and clear the playlist from the app. The interface follows your phone's language and is available in English and French.
 
 ## What you can do
 

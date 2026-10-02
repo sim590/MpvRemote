@@ -112,15 +112,6 @@
                     android:text="@string/control_clear"
                     android:layout_marginBottom="8dp" />
 
-                <TextView
-                    android:id="@+id/status_text"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="24dp"
-                    android:text="@string/status_idle"
-                    android:textIsSelectable="true"
-                    android:textAppearance="?attr/textAppearanceBodyLarge" />
-
             </LinearLayout>
 
             <LinearLayout

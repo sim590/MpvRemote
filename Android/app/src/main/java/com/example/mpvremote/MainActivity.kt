@@ -7,7 +7,6 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.addCallback
 import androidx.appcompat.app.ActionBarDrawerToggle
@@ -39,7 +38,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var controlNext: ImageButton
     private lateinit var controlStop: ImageButton
     private lateinit var controlClear: Button
-    private lateinit var statusText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,7 +58,6 @@ class MainActivity : AppCompatActivity() {
         controlNext = findViewById(R.id.control_next)
         controlStop = findViewById(R.id.control_stop)
         controlClear = findViewById(R.id.control_clear)
-        statusText = findViewById(R.id.status_text)
 
         setupDrawer()
         showSection(Section.REMOTE)
@@ -175,14 +172,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         val settings = currentSettings()
-        setStatusSending(getString(R.string.sending, sharedUrl))
 
         Thread {
             try {
                 sendPlayRequest(settings.baseUrl, settings.socketPath, settings.append, sharedUrl)
-                runOnUiThread { setStatusSuccess(getString(R.string.success_sent, sharedUrl)) }
+                runOnUiThread { showSuccess(getString(R.string.success_sent, sharedUrl)) }
             } catch (e: Exception) {
-                runOnUiThread { setStatusError(e.message ?: e.javaClass.simpleName) }
+                runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
             }
         }.start()
     }
@@ -194,8 +190,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        setStatusSending(getString(R.string.sending_control, action))
-
         Thread {
             try {
                 val payload = JSONObject().apply {
@@ -203,9 +197,9 @@ class MainActivity : AppCompatActivity() {
                     put("socket", settings.socketPath)
                 }
                 postJson(settings.baseUrl, "/control", payload)
-                runOnUiThread { setStatusSuccess(getString(R.string.success_control, action)) }
+                runOnUiThread { showSuccess(getString(R.string.success_control, action)) }
             } catch (e: Exception) {
-                runOnUiThread { setStatusError(e.message ?: e.javaClass.simpleName) }
+                runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
             }
         }.start()
     }
@@ -255,26 +249,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun setStatusSending(message: String) {
-        statusText.text = message
-        statusText.setTextColor(getColor(R.color.text_primary))
-    }
-
-    private fun setStatusSuccess(message: String) {
-        statusText.text = message
-        statusText.setTextColor(getColor(R.color.success))
+    private fun showSuccess(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
-    private fun setStatusError(message: String) {
-        statusText.text = getString(R.string.error_send, message)
-        statusText.setTextColor(getColor(R.color.error))
-        Toast.makeText(this, getString(R.string.error_send, message), Toast.LENGTH_LONG).show()
-    }
-
     private fun showError(message: String) {
-        statusText.text = message
-        statusText.setTextColor(getColor(R.color.error))
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 

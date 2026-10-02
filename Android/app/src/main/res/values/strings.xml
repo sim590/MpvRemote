@@ -17,10 +17,7 @@
     <string name="nav_settings">Settings</string>
     <string name="drawer_open">Open menu</string>
     <string name="drawer_close">Close menu</string>
-    <string name="status_idle">Ready</string>
-    <string name="sending">Sending %1$s…</string>
     <string name="success_sent">Sent: %1$s</string>
-    <string name="sending_control">Sending %1$s command…</string>
     <string name="success_control">%1$s command sent</string>
     <string name="error_send">Error: %1$s</string>
     <string name="error_no_url">No URL received</string>

@@ -14,10 +14,7 @@
     <string name="nav_settings">Paramètres</string>
     <string name="drawer_open">Ouvrir le menu</string>
     <string name="drawer_close">Fermer le menu</string>
-    <string name="status_idle">Prêt</string>
-    <string name="sending">Envoi de %1$s…</string>
     <string name="success_sent">Envoyé : %1$s</string>
-    <string name="sending_control">Envoi de la commande %1$s…</string>
     <string name="success_control">Commande %1$s envoyée</string>
     <string name="error_send">Erreur : %1$s</string>
     <string name="error_no_url">Aucune URL reçue</string>

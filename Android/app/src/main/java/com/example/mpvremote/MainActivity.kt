@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playlistRecyclerView: RecyclerView
     private lateinit var playlistEmptyView: TextView
     private lateinit var playlistAdapter: PlaylistAdapter
+    private val titleResolver = TitleResolver()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -124,6 +125,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupPlaylist() {
         playlistAdapter = PlaylistAdapter(
+            titleResolver = titleResolver,
             onItemClick = { item -> playPlaylistItem(item) },
             onRemove = { item -> removePlaylistItem(item) }
         )

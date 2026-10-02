@@ -41,4 +41,5 @@ dependencies {
     implementation(libs.material)
     implementation(libs.constraintlayout)
     implementation(libs.swiperefreshlayout)
+    testImplementation(libs.junit)
 }

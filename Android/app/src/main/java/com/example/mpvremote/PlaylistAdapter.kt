@@ -18,15 +18,36 @@ data class PlaylistItem(
 )
 
 class PlaylistAdapter(
+    private val titleResolver: TitleResolver,
     private val onItemClick: (PlaylistItem) -> Unit,
     private val onRemove: (PlaylistItem) -> Unit
 ) : RecyclerView.Adapter<PlaylistAdapter.ViewHolder>() {
 
     private var items: List<PlaylistItem> = emptyList()
+    private val resolvedTitles = mutableMapOf<String, String>()
 
     fun submitList(newItems: List<PlaylistItem>) {
         items = newItems
         notifyDataSetChanged()
+        resolveMissingTitles()
+    }
+
+    private fun resolveMissingTitles() {
+        for (item in items) {
+            if (item.title.isBlank()) {
+                titleResolver.resolve(item.filename) { resolved ->
+                    updateResolvedTitle(item.filename, resolved)
+                }
+            }
+        }
+    }
+
+    private fun updateResolvedTitle(filename: String, resolved: String) {
+        val index = items.indexOfFirst { it.filename == filename }
+        if (index >= 0 && items[index].title.isBlank()) {
+            resolvedTitles[filename] = resolved
+            notifyItemChanged(index)
+        }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
@@ -51,11 +72,15 @@ class PlaylistAdapter(
             itemView.setOnClickListener { onItemClick(item) }
             removeButton.setOnClickListener { onRemove(item) }
 
-            if (item.title.isBlank()) {
-                titleView.text = item.filename
+            val resolvedTitle = resolvedTitles[item.filename]
+            val displayTitle = item.title.takeIf { it.isNotBlank() }
+                ?: resolvedTitle?.takeIf { it.isNotBlank() }
+                ?: item.filename
+
+            titleView.text = displayTitle
+            if (displayTitle == item.filename && item.title.isBlank()) {
                 subtitleView.visibility = View.GONE
             } else {
-                titleView.text = item.title
                 subtitleView.text = item.filename
                 subtitleView.visibility = View.VISIBLE
             }

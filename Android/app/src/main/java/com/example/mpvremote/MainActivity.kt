@@ -112,13 +112,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+        // Only handle a SHARE intent on a fresh creation. After a configuration
+        // change (rotation, theme switch, etc.) Android recreates the Activity
+        // with the same intent, so re-processing it would resend the same URL.
+        if (savedInstanceState == null &&
+            intent.action == Intent.ACTION_SEND &&
+            intent.type == "text/plain"
+        ) {
             handleSendIntent(intent)
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
             showSection(Section.REMOTE)
             handleSendIntent(intent)

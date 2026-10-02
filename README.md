@@ -1,8 +1,8 @@
 # MpvRemote
 
-Share an URL, tap the buttons, and enjoy your videos on the big screen.
+Share a URL, tap the buttons, and enjoy your videos on the big screen.
 
-MpvRemote lets you control [MPV](https://mpv.io) on your computer from an Android phone. Share a video URL from any app, and MpvRemote loads it in MPV. You can also play/pause, skip tracks, stop playback, and clear the playlist from the app. The interface follows your phone's language and is available in English and French.
+MpvRemote lets you control [MPV](https://mpv.io) on your computer from an Android phone. Share a video URL from any app, and MpvRemote loads it in MPV. The app has a side menu (tap the hamburger icon) with two pages: **Remote** for playback controls and the playlist, and **Settings** for the relay configuration. The interface follows your phone's language and is available in English and French.
 
 ## What you can do
 
@@ -12,6 +12,10 @@ From the Android app:
 - **Play / pause** - Toggle playback.
 - **Previous / next** - Skip between playlist items.
 - **Stop** - Stop playback and return to MPV's idle screen. The playlist is kept, so Previous/Next resume from where you stopped.
+- **Seek** - Drag the position bar above the control buttons to jump to any point in the video.
+- **Volume** - When the app is in the foreground, your phone's physical volume buttons control MPV's volume. MPV shows its on-screen display as usual.
+- **Mute** - Toggle mute with the dedicated button.
+- **Playlist** - View the current queue under the controls. The current item is highlighted. Tap an entry to play it, or tap the X to remove it. Pull down to refresh the list. Titles are resolved automatically when possible; otherwise the URL is shown. MPV's own title takes priority once playback starts.
 - **Clear playlist** - Empty the queue.
 
 ## Components
@@ -81,7 +85,7 @@ Or copy the APK to your phone and open it with a file manager.
 
 ## Configure the app
 
-When you first open MpvRemote, set two fields:
+Open the side menu and tap **Settings**. Set two fields:
 
 - **Relay base URL** - The address where the relay is reachable.
   - Local network example: `http://192.168.1.42:8765`
@@ -116,3 +120,4 @@ Make sure your phone and computer are on the same network.
 - With `--host 0.0.0.0`, the relay is exposed to your local network with no encryption or authentication. Only use this on a trusted private network.
 - The relay only accepts `http`/`https` URLs and limits request body size.
 
+See `CONTRIBUTING.md` for build and development instructions.

@@ -132,6 +132,13 @@
                 </LinearLayout>
 
                 <Button
+                    android:id="@+id/send_clipboard_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/send_clipboard"
+                    android:layout_marginBottom="8dp" />
+
+                <Button
                     android:id="@+id/control_clear"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -222,7 +229,14 @@
                     android:id="@+id/save_button"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/save_settings" />
+                    android:text="@string/save_settings"
+                    android:layout_marginBottom="16dp" />
+
+                <Button
+                    android:id="@+id/open_link_settings_button"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/open_link_settings" />
 
             </LinearLayout>
 

@@ -5,6 +5,14 @@
     <string name="save_settings">Sauvegarder</string>
     <string name="controls_section_label">Contrôles</string>
     <string name="control_clear">Effacer la liste</string>
+    <string name="send_clipboard">Envoyer le presse-papiers</string>
+    <string name="clipboard_empty">Presse-papiers vide</string>
+    <string name="clipboard_no_url">Aucune URL dans le presse-papiers</string>
+    <string name="intent_filter_youtube">YouTube</string>
+    <string name="intent_filter_youtube_short">YouTube</string>
+    <string name="intent_filter_twitch">Twitch</string>
+    <string name="open_link_settings">Ouvrir les réglages de liens</string>
+    <string name="open_link_settings_error">Impossible d\'ouvrir les réglages de liens</string>
     <string name="control_stop_desc">Arrêter la lecture</string>
     <string name="control_mute_desc">Sourdine</string>
     <string name="mute_enabled">Sourdine activée</string>

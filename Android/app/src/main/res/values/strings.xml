@@ -8,6 +8,14 @@
     <string name="save_settings">Save</string>
     <string name="controls_section_label">Controls</string>
     <string name="control_clear">Clear playlist</string>
+    <string name="send_clipboard">Send clipboard</string>
+    <string name="clipboard_empty">Clipboard is empty</string>
+    <string name="clipboard_no_url">No URL found in clipboard</string>
+    <string name="intent_filter_youtube">YouTube</string>
+    <string name="intent_filter_youtube_short">YouTube</string>
+    <string name="intent_filter_twitch">Twitch</string>
+    <string name="open_link_settings">Open link settings</string>
+    <string name="open_link_settings_error">Could not open link settings</string>
     <string name="control_stop_desc">Stop playback</string>
     <string name="control_mute_desc">Mute</string>
     <string name="mute_enabled">Mute enabled</string>

@@ -9,6 +9,8 @@ MpvRemote lets you control [MPV](https://mpv.io) on your computer from an Androi
 From the Android app:
 
 - **Share a URL** - In any app (browser, YouTube, etc.), choose *Share* -> **MpvRemote**. The video is sent to MPV on your computer.
+- **Send clipboard** - Tap the button to send the URL currently on your clipboard.
+- **Open links** - Configure MpvRemote to open YouTube and Twitch links directly; see [Open links with MpvRemote](#open-links-with-mpvremote).
 - **Play / pause** - Toggle playback.
 - **Previous / next** - Skip between playlist items.
 - **Stop** - Stop playback and return to MPV's idle screen. The playlist is kept, so Previous/Next resume from where you stopped.
@@ -94,6 +96,15 @@ Open the side menu and tap **Settings**. Set two fields:
 There is also an **Append to playlist** checkbox. When checked, shared URLs are appended to the end of the playlist instead of replacing the current item.
 
 Tap **Save** to store the settings.
+
+## Open links with MpvRemote
+
+MpvRemote can open YouTube and Twitch links directly. On Android 12+, you must enable this manually because MpvRemote does not own those domains:
+
+- Go to **Settings > Apps > MpvRemote > Open by default**, turn on "Open supported links", then check the YouTube and Twitch domains.
+- Or tap **Open link settings** in the app's Settings page.
+
+Only some paths are intercepted (watch, shorts, live, clips, etc.). Firefox Android has "Open links in apps" disabled by default; enable it if you want links to open in MpvRemote.
 
 ## Connect over the local network
 

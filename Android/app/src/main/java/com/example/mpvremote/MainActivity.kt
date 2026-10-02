@@ -1,10 +1,14 @@
 package com.example.mpvremote
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.KeyEvent
 import android.view.View
 import android.widget.Button
@@ -41,12 +45,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var socketPathInput: EditText
     private lateinit var appendCheckbox: CheckBox
     private lateinit var saveButton: Button
+    private lateinit var openLinkSettingsButton: Button
     private lateinit var controlPlayPause: ImageButton
     private lateinit var controlPrevious: ImageButton
     private lateinit var controlNext: ImageButton
     private lateinit var controlStop: ImageButton
     private lateinit var controlMute: ImageButton
     private lateinit var controlClear: Button
+    private lateinit var sendClipboardButton: Button
 
     private lateinit var playbackProgress: com.google.android.material.slider.Slider
     private lateinit var playbackTime: TextView
@@ -82,12 +88,14 @@ class MainActivity : AppCompatActivity() {
         socketPathInput = findViewById(R.id.socket_path_input)
         appendCheckbox = findViewById(R.id.append_checkbox)
         saveButton = findViewById(R.id.save_button)
+        openLinkSettingsButton = findViewById(R.id.open_link_settings_button)
         controlPlayPause = findViewById(R.id.control_play_pause)
         controlPrevious = findViewById(R.id.control_previous)
         controlNext = findViewById(R.id.control_next)
         controlStop = findViewById(R.id.control_stop)
         controlMute = findViewById(R.id.control_mute)
         controlClear = findViewById(R.id.control_clear)
+        sendClipboardButton = findViewById(R.id.send_clipboard_button)
 
         playbackProgress = findViewById(R.id.playback_progress)
         playbackTime = findViewById(R.id.playback_time)
@@ -112,23 +120,29 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Only handle a SHARE intent on a fresh creation. After a configuration
+        // Only handle a SHARE/VIEW intent on a fresh creation. After a configuration
         // change (rotation, theme switch, etc.) Android recreates the Activity
         // with the same intent, so re-processing it would resend the same URL.
-        if (savedInstanceState == null &&
-            intent.action == Intent.ACTION_SEND &&
-            intent.type == "text/plain"
-        ) {
-            handleSendIntent(intent)
+        if (savedInstanceState == null) {
+            when (intent.action) {
+                Intent.ACTION_SEND -> if (intent.type == "text/plain") handleSendIntent(intent)
+                Intent.ACTION_VIEW -> handleViewIntent(intent)
+            }
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            showSection(Section.REMOTE)
-            handleSendIntent(intent)
+        when (intent.action) {
+            Intent.ACTION_SEND -> if (intent.type == "text/plain") {
+                showSection(Section.REMOTE)
+                handleSendIntent(intent)
+            }
+            Intent.ACTION_VIEW -> {
+                showSection(Section.REMOTE)
+                handleViewIntent(intent)
+            }
         }
     }
 
@@ -219,6 +233,8 @@ class MainActivity : AppCompatActivity() {
         controlStop.setOnClickListener { sendControlRequest(ACTION_STOP) }
         controlMute.setOnClickListener { toggleMute() }
         controlClear.setOnClickListener { sendControlRequest(ACTION_CLEAR) }
+        sendClipboardButton.setOnClickListener { sendClipboardUrl() }
+        openLinkSettingsButton.setOnClickListener { openLinkSettings() }
     }
 
     private fun showSection(section: Section) {
@@ -422,6 +438,18 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show()
     }
 
+    private fun openLinkSettings() {
+        try {
+            val intent = Intent(
+                "android.settings.APP_OPEN_BY_DEFAULT_SETTINGS",
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+        } catch (e: Exception) {
+            showError(getString(R.string.open_link_settings_error))
+        }
+    }
+
     private fun currentSettings(): Settings {
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         return Settings(
@@ -437,14 +465,52 @@ class MainActivity : AppCompatActivity() {
             showError(getString(R.string.error_send, getString(R.string.error_no_url)))
             return
         }
+        sendUrl(sharedUrl)
+    }
+
+    private fun sendClipboardUrl() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip
+        if (clip == null || clip.itemCount == 0) {
+            showError(getString(R.string.clipboard_empty))
+            return
+        }
+        val text = clip.getItemAt(0).text?.toString()
+        if (text.isNullOrBlank()) {
+            showError(getString(R.string.clipboard_empty))
+            return
+        }
+        if (!isValidHttpUrl(text)) {
+            showError(getString(R.string.clipboard_no_url))
+            return
+        }
+        sendUrl(text)
+    }
+
+    private fun handleViewIntent(intent: Intent) {
+        val data: Uri = intent.data ?: return
+        val url = data.toString()
+        if (!isValidHttpUrl(url)) {
+            showError(getString(R.string.error_send, getString(R.string.error_no_url)))
+            return
+        }
+        sendUrl(url)
+    }
+
+    private fun sendUrl(url: String) {
+        val trimmed = url.trim()
+        if (!isValidHttpUrl(trimmed)) {
+            showError(getString(R.string.error_send, getString(R.string.error_no_url)))
+            return
+        }
 
         val settings = currentSettings()
 
         Thread {
             try {
-                sendPlayRequest(settings.baseUrl, settings.socketPath, settings.append, sharedUrl)
+                sendPlayRequest(settings.baseUrl, settings.socketPath, settings.append, trimmed)
                 runOnUiThread {
-                    showSuccess(getString(R.string.success_sent, sharedUrl))
+                    showSuccess(getString(R.string.success_sent, trimmed))
                     loadPlaylist()
                     fetchStateImmediate()
                 }
@@ -452,6 +518,11 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { showError(e.message ?: e.javaClass.simpleName) }
             }
         }.start()
+    }
+
+    private fun isValidHttpUrl(url: String): Boolean {
+        return url.startsWith("http://", ignoreCase = true) ||
+                url.startsWith("https://", ignoreCase = true)
     }
 
     private fun sendControlRequest(
